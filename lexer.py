@@ -8,10 +8,6 @@ This is the same file from PA 2's repo -- copy your own working
 tokenize() implementation over this stub before starting parser.py.
 Every PA repo is independent (no shared filesystem across repos), so
 each pipeline stage bundles its own copy of the prior stages.
-
-Complete tokenize() below. See the assignment, Part B,
-for the full requirements. Must use a single compiled master regex
-with named groups -- not a hand-rolled character-by-character loop.
 """
 
 import re
@@ -32,7 +28,20 @@ class LexError(Exception):
 
 # TODO: build your master regex here, e.g.:
 # _MASTER_RE = re.compile(r"(?P<NUMBER>\d+)|(?P<IDENT>[A-Za-z_]\w*)|...")
-
+_MASTER_RE = re.compile(
+    r"(?P<NUMBER>[0-9]+)"
+    r"|(?P<IDENT>[A-Za-z][A-Za-z0-9]*)"
+    r"|(?P<WHITESPACE>[ \t\r\n]+)"
+    r"|(?P<COMMENT>\#[^\r\n]*)"
+    r"|(?P<PLUS>\+)"
+    r"|(?P<MINUS>-)"
+    r"|(?P<STAR>\*)"
+    r"|(?P<SLASH>/)"
+    r"|(?P<LPAREN>\()"
+    r"|(?P<RPAREN>\))"
+    r"|(?P<ASSIGN>=)"
+    r"|(?P<SEMI>;)"
+)
 
 def tokenize(source: str) -> List[Token]:
     """
@@ -44,4 +53,29 @@ def tokenize(source: str) -> List[Token]:
     offending character and line) on unrecognized input.
     """
     # TODO
-    raise NotImplementedError
+    tokens = []
+    position = 0
+    line = 1
+    while position < len(source):
+        match = _MASTER_RE.match(source, position)
+        if match is None:
+            raise LexError(
+                f"Unexpected character {source[position]!r} on line {line}"
+            )
+        
+        token_type = match.lastgroup
+        lexeme = match.group()
+
+        position = match.end()
+
+        if token_type == "WHITESPACE" or token_type == "COMMENT":
+            line += lexeme.count("\n")
+            continue
+        
+        if token_type == "IDENT" and lexeme == "let":
+            token_type = "LET"
+
+        tokens.append(Token(token_type, lexeme, line))
+
+    tokens.append(Token("EOF", "", line))
+    return tokens

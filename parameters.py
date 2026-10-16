@@ -75,8 +75,51 @@ def bind_parameters(param_specs: List[Tuple[str, str]], arg_nodes: list, caller_
     delayed write-back later -- store it whichever way you like (e.g.
     an attribute on callee_record such as callee_record.pending_writeback).
     """
-    # TODO
-    raise NotImplementedError
+    callee_env = callee_record.locals_env
+    pending: List[Tuple[str, Cell]] = []  # (callee param name, caller's Cell), in parameter order
+
+    for (name, mode), arg_node in zip(param_specs, arg_nodes):
+        if mode == "value":
+            # May be any expression. Evaluate it now and give the callee a
+            # brand-new private Cell -- writes to the parameter never touch
+            # whatever Cell (if any) the caller's expression came from.
+            value = evaluate(arg_node, caller_env)
+            callee_env.define(name, Cell(value))
+
+        elif mode == "reference":
+            # Must name a caller variable -- we need its actual Cell, not
+            # just its current value, so the callee can write through it.
+            if not isinstance(arg_node, Variable):
+                raise TypeError(
+                    f"reference parameter {name!r} requires a caller variable, got {arg_node!r}"
+                )
+            caller_cell = caller_env.resolve(arg_node.name)
+            if not isinstance(caller_cell, Cell):
+                raise TypeError(f"'{arg_node.name}' is not bound to a Cell")
+            # Bind the callee's name directly to the SAME Cell object --
+            # this is the aliasing that makes writes visible immediately.
+            callee_env.define(name, caller_cell)
+
+        elif mode == "value-result":
+            # Must also name a caller variable, since we need a destination
+            # to copy back into later -- but the callee gets its OWN Cell
+            # for the duration of the call, so intermediate writes stay
+            # invisible to the caller until commit_value_result runs.
+            if not isinstance(arg_node, Variable):
+                raise TypeError(
+                    f"value-result parameter {name!r} requires a caller variable, got {arg_node!r}"
+                )
+            caller_cell = caller_env.resolve(arg_node.name)
+            if not isinstance(caller_cell, Cell):
+                raise TypeError(f"'{arg_node.name}' is not bound to a Cell")
+            initial_value = caller_cell.value
+            callee_env.define(name, Cell(initial_value))
+            pending.append((name, caller_cell))
+
+        else:
+            raise ValueError(f"unknown parameter mode: {mode!r}")
+
+    callee_record.pending_writeback = pending
 
 
 def commit_value_result(callee_record, caller_env: Environment) -> None:
@@ -86,14 +129,15 @@ def commit_value_result(callee_record, caller_env: Environment) -> None:
     corresponding variable now (call this only after the callee's body
     has finished running).
     """
-    # TODO
-    raise NotImplementedError
+    for name, caller_cell in getattr(callee_record, "pending_writeback", []):
+        local_cell = callee_record.locals_env.resolve(name)
+        caller_cell.value = local_cell.value if isinstance(local_cell, Cell) else local_cell
 
 
 class Closure:
     def __init__(self, declaration: FunctionDecl, defining_env: Environment) -> None:
-        # TODO
-        raise NotImplementedError
+        self.declaration = declaration
+        self.defining_env = defining_env
 
     def call(self, args: list, caller_env: Environment):
         """
@@ -103,5 +147,7 @@ class Closure:
         values, wrapped in a Cell), then evaluate declaration.body in
         that new environment and return the result.
         """
-        # TODO
-        raise NotImplementedError
+        call_env = Environment(parent=self.defining_env)
+        for param_name, value in zip(self.declaration.params, args):
+            call_env.define(param_name, Cell(value))
+        return evaluate(self.declaration.body, call_env)
